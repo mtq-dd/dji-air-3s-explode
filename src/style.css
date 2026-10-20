@@ -12,6 +12,7 @@
   --panel: rgba(10, 16, 24, 0.72);
   --panel-b: rgba(90, 200, 255, 0.14);
   --mono: "SF Mono", "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --bar-h: 62px;   /* 移动端底部部件条高度（含安全区） */
 }
 
 * { box-sizing: border-box; }
@@ -867,7 +868,7 @@ body.flight-mode .hud-bottom {
   .panel.parts {
     left: 0; right: 0; bottom: 0; top: auto;
     width: auto; max-height: none;
-    height: 78px;
+    height: var(--bar-h);
     border-radius: 12px 12px 0 0;
     border-left: none; border-right: none; border-bottom: none;
   }
@@ -875,16 +876,19 @@ body.flight-mode .hud-bottom {
   #partList {
     display: flex;
     gap: 5px;
-    padding: 9px 8px;
+    padding: 8px;
     overflow-x: auto;
     overflow-y: hidden;
+    scrollbar-width: none;
   }
+  #partList::-webkit-scrollbar { display: none; }
   .part-row {
     flex: 0 0 auto;
     flex-direction: column;
     align-items: flex-start;
+    justify-content: center;
     gap: 0;
-    padding: 7px 11px;
+    padding: 0 12px;
     background: rgba(255, 255, 255, 0.035);
     border-color: rgba(255, 255, 255, 0.05);
   }
@@ -896,7 +900,7 @@ body.flight-mode .hud-bottom {
 
   /* 参数面板 → 浮层 */
   .panel.info {
-    left: 0; right: 0; bottom: 78px; top: auto;
+    left: 0; right: 0; bottom: var(--bar-h); top: auto;
     width: auto; max-width: none;
     max-height: 44vh;
     border-radius: 12px 12px 0 0;
@@ -955,4 +959,36 @@ body.flight-mode .hud-bottom {
   .log { max-height: 30px; }
   .log-line { font-size: 8.5px; }
   .deck-keys { display: none; }
+}
+
+/* ============================================================
+   Android WebView 降级
+   ------------------------------------------------------------
+   backdrop-filter 需要在合成阶段回读底下的图层。当它压在大面积
+   WebGL 画布上时，部分 WebView 内核会直接丢掉画布图层（整块黑屏），
+   横竖屏切换后才恢复。WebView 内改为接近不透明的实色面板，
+   视觉差异很小，但能彻底绕开这条路径。
+   ============================================================ */
+html.webview .btn,
+html.webview .panel,
+html.webview .deck,
+html.webview .lbl-in {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.webview .btn {
+  background: rgba(9, 16, 24, 0.92);
+}
+
+html.webview .panel {
+  background: rgba(8, 14, 21, 0.95);
+}
+
+html.webview .deck {
+  background: linear-gradient(180deg, rgba(12, 20, 30, 0.985), rgba(6, 11, 18, 0.995));
+}
+
+html.webview .lbl-in {
+  background: rgba(7, 13, 20, 0.94);
 }

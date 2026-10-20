@@ -163,6 +163,28 @@ CI 里配置 `SIGNING_STORE_FILE` / `SIGNING_STORE_PASSWORD` / `SIGNING_KEY_ALIA
 
 若要摆脱 WebView，推荐 Google **Filament**（`com.google.android.filament`）或封装库 **SceneView**：PBR 与 Bloom 内置，但需要把放样、扁锥管、桨叶挤出这套几何逻辑改写成 `VertexBuffer` 构建流程，工作量约为 Web 版的 1.5～2 倍。
 
+### 画布黑屏（Android WebView）
+
+现象：进入飞行控制台后 3D 画布偶发整块变黑，切一次横竖屏就恢复。
+
+原因不在 Three.js，而是 WebView 的合成层问题：页面还在跑（帧率正常、没有 `contextlost`），但 WebGL 图层被系统丢掉了，屏幕停在一张全黑的帧上。转屏之所以能修好，是因为旋转触发了一次视口尺寸变化，浏览器不得不重建合成表面。另外 `backdrop-filter`（毛玻璃）压在大面积 WebGL 画布上，是这类问题的常见诱因。
+
+现在的处理是三层，用户不用再手动转屏：
+
+| 层 | 做法 | 文件 |
+| --- | --- | --- |
+| 样式 | WebView 内关闭 `backdrop-filter`，面板改为接近不透明的实色 | `src/style.css` → `html.webview` |
+| 时机 | 进出飞行控制台、转屏、切后台回来、重新获得焦点时，重建绘制缓冲并调用原生微调一次 WebView 尺寸（等价于"人工转屏"） | `src/main.js` → `kickSurface()` |
+| 兜底 | 原生看门狗每 4s 用 `PixelCopy` 抓一次画面中段算亮度：一旦出现「原本有内容 → 连续两次纯黑」，自动重建合成表面 | `MainActivity.kt` → `sampleCanvas()` |
+
+调试时可以在 DevTools 控制台直接调用：
+
+```js
+DroneRender.size()      // 当前逻辑尺寸与 dpr
+DroneRender.resize()    // 强制同步尺寸
+DroneRender.kick(true)  // 立即重建绘制缓冲 + 通知原生重建 surface
+```
+
 ## 说明
 
 参数取自 DJI 官方公开规格节选，仅用于可视化演示，未逐一核对全部细项。

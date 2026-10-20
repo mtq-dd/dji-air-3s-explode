@@ -384,6 +384,11 @@ function textTexture(lines) {
 const stage = document.getElementById('stage');
 const labelLayer = document.getElementById('labelLayer');
 
+/* Android WebView 识别：毛玻璃（backdrop-filter）叠在 WebGL 图层上，
+   在部分机型/内核版本里会让整块画布变黑，因此 WebView 内降级为不透明面板 */
+const inWebView = !!window.AndroidBridge || /;\s*wv\)/.test(navigator.userAgent);
+if (inWebView) document.documentElement.classList.add('webview');
+
 const renderer = new THREE.WebGLRenderer({
   antialias: true,
   alpha: false,
@@ -1123,7 +1128,7 @@ function updateFit(explodedSet) {
   const portrait = window.innerWidth / window.innerHeight < 0.95;
   const short = !portrait && window.innerHeight < 860;
   const margin = portrait
-    ? (state.flight ? 0.92 : 0.82)
+    ? (state.flight ? 0.97 : 0.94)
     : (state.flight ? (short ? 0.78 : 0.88) : 0.92);
   state.fitTarget = THREE.MathUtils.clamp((margin / Math.max(maxN, 0.05)), 0.12, 1.06);
 }
@@ -1414,11 +1419,26 @@ renderer.domElement.addEventListener('pointerleave', () => {
 });
 
 /* --- 尺寸 --- */
-function onResize() {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
+let lastW = 0;
+let lastH = 0;
+let lastDpr = 0;
+
+/* 以 #stage 的实际布局尺寸为准：WebView 旋转 / 沉浸式状态栏 / 分屏时
+   window.innerWidth 偶发滞后一帧，直接用布局尺寸更稳 */
+function sizeOf() {
+  const r = stage.getBoundingClientRect();
+  const w = Math.max(1, Math.round(r.width) || window.innerWidth || 1);
+  const h = Math.max(1, Math.round(r.height) || window.innerHeight || 1);
+  return { w, h };
+}
+
+function applySize(w, h, dpr) {
+  lastW = w;
+  lastH = h;
+  lastDpr = dpr;
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  renderer.setPixelRatio(dpr);
   renderer.setSize(w, h);
   composer.setSize(w, h);
   bloom.setSize(w, h);
@@ -1426,7 +1446,82 @@ function onResize() {
   applyViewportBias();
   updateFit(state.exploded);
 }
-window.addEventListener('resize', onResize);
+
+function onResize(force) {
+  const { w, h } = sizeOf();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (!force && w === lastW && h === lastH && dpr === lastDpr) return;
+  applySize(w, h, dpr);
+}
+
+/* WebGL 图层自愈：
+   Android WebView 在「切后台再回来」「进出飞行控制台」等场景下，
+   偶尔只保留最后一帧、不再重新合成，整块画布变黑——转一次屏幕就好。
+   这里用重建绘制缓冲 + 通知宿主做一次 surface 尺寸微调来复现"转屏"的效果，
+   用户不必再手动横竖屏切换。 */
+let kickLock = -1e9;
+function kickSurface(force) {
+  const now = performance.now();
+  if (!force && now - kickLock < 420) return; // 防抖：连续调用只做一次
+  kickLock = now;
+
+  const { w, h } = sizeOf();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  // 1) 换一个临时 pixelRatio，强制 Three 重新分配 drawingBuffer
+  renderer.setPixelRatio(dpr * 0.999);
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+  bloom.setSize(w, h);
+
+  requestAnimationFrame(() => {
+    applySize(w, h, dpr);
+    // 2) 通知原生侧微调一次 WebView 尺寸（等价于转屏引发的 surface 重建）
+    try {
+      if (window.AndroidBridge && AndroidBridge.nudgeSurface) AndroidBridge.nudgeSurface();
+    } catch (e) { /* 桌面浏览器没有这个桥，忽略 */ }
+  });
+}
+
+window.addEventListener('resize', () => onResize());
+window.addEventListener(
+  'orientationchange',
+  () => {
+    onResize(true);
+    setTimeout(() => { onResize(true); kickSurface(); }, 280);
+  },
+  { passive: true }
+);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => onResize(true), { passive: true });
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  onResize(true);
+  kickSurface();
+});
+window.addEventListener('focus', () => {
+  onResize(true);
+  kickSurface();
+});
+if (window.ResizeObserver) {
+  new ResizeObserver(() => onResize()).observe(stage);
+}
+
+/* WebGL 上下文丢失/恢复：丢失后画面同样是黑的，恢复时重建尺寸与缓冲 */
+renderer.domElement.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  pushLog('图形上下文丢失 · 正在恢复渲染', 'warn');
+});
+renderer.domElement.addEventListener('webglcontextrestored', () => {
+  onResize(true);
+  kickSurface();
+});
+window.DroneRender = {
+  kick: kickSurface,
+  resize: () => onResize(true),
+  size: () => ({ ...sizeOf(), dpr: window.devicePixelRatio })
+};
 
 /* 标签屏幕空间避让：同列向下错开，避免互相压住 */
 const _lv = new THREE.Vector3();
@@ -1908,9 +2003,9 @@ function updateFlight(dt) {
   flightLight.position.set(FLIGHT.pos.x, 0.12 + FLIGHT.lift, FLIGHT.pos.y);
   flightLight.intensity = 0.8 + FLIGHT.rpm * 3.6;
 
-  /* 电量与飞行时长 */
+  /* 电量与飞行时长（按 Air 3S 约 45 分钟续航折算，空中 ~0.06%/s） */
   if (FLIGHT.power) {
-    const drain = isAirborne() ? 0.62 : 0.05;
+    const drain = isAirborne() ? 0.06 : 0.015;
     FLIGHT.battery = Math.max(0, FLIGHT.battery - drain * dt);
     if (isAirborne()) FLIGHT.flightTime += dt;
     if (!FLIGHT.warnedLow && FLIGHT.battery <= 20) {
@@ -1997,6 +2092,8 @@ function setFlightMode(on) {
     pushLog('控制台已接管 · 等待「开机」指令', 'info');
     renderTelemetry();
     updateFit(state.exploded);
+    // 面板显隐会改变合成层，等布局稳定后重建一次绘制缓冲，避免整块黑屏
+    requestAnimationFrame(() => kickSurface());
     return true;
   }
 
@@ -2022,6 +2119,7 @@ function setFlightMode(on) {
   applyViewportBias();
   updateFit(state.exploded);
   renderInfo(null);
+  requestAnimationFrame(() => kickSurface());
   setStatus();
   return true;
 }
@@ -2145,7 +2243,7 @@ function animate() {
 
 /* 竖屏时下移观察点，让模型整体上移，避开底部面板 */
 function viewBaseY() {
-  return window.innerWidth / window.innerHeight < 0.95 ? -0.45 : 0.2;
+  return window.innerWidth / window.innerHeight < 0.95 ? -0.34 : 0.2;
 }
 function applyViewportBias() {
   controls.target.set(0, viewBaseY(), 0);
