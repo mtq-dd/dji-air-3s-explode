@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>DJI Air 3S · 结构拆解可视化</title>
+<meta name="description" content="DJI Air 3S 无人机 3D 拆解可视化 · Three.js 程序化建模" />
+<style>
+/*__CSS__*/
+</style>
+</head>
+<body>
+
+<div id="stage"></div>
+<div id="labelLayer"></div>
+
+<!-- 顶部栏 -->
+<header class="hud-top">
+  <div class="brand">
+    <div class="brand-mark"></div>
+    <div>
+      <h1>DJI AIR 3S</h1>
+      <p>Structure Exploded View / 结构拆解可视化</p>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn" id="btnExplode" type="button"><span class="dot"></span><span class="lbl-txt">全部拆解</span></button>
+    <button class="btn" id="btnFlight" type="button"><span class="dot"></span>飞行控制</button>
+    <button class="btn" id="btnReset" type="button"><span class="dot"></span>复原视角</button>
+    <button class="btn on" id="btnLabels" type="button"><span class="dot"></span>标注</button>
+    <button class="btn on" id="btnSpin" type="button"><span class="dot"></span>自转</button>
+  </div>
+</header>
+
+<!-- 部件清单 -->
+<aside class="panel parts">
+  <div class="panel-head">
+    <span>部件清单</span>
+    <em>08 COMPONENTS</em>
+  </div>
+  <ul id="partList"></ul>
+  <div class="panel-foot">
+    <div class="legend">
+      <i class="cyan"></i>选中高亮
+      <i class="amber"></i>已拆解
+    </div>
+  </div>
+</aside>
+
+<!-- 参数面板 -->
+<aside class="panel info">
+  <div class="info-empty" id="infoEmpty">
+    <div class="ico"></div>
+    <p>点击模型上的任意部件<br />查看结构说明与规格参数</p>
+    <small>CLICK A COMPONENT TO INSPECT</small>
+  </div>
+  <div class="info-body" id="infoBody" hidden>
+    <div class="info-tag">
+      <span id="infoIndex">01 / 08</span>
+      <span id="infoCat">×1</span>
+    </div>
+    <h2 class="info-title" id="infoTitle">机身主体</h2>
+    <div class="info-en" id="infoEn">Airframe</div>
+    <p class="info-desc" id="infoDesc"></p>
+    <div class="spec" id="infoSpecs"></div>
+    <div class="spec-note">参数取自官方公开规格节选，仅用于可视化演示。</div>
+    <div class="info-actions">
+      <button class="btn" id="btnPartToggle" type="button"><span class="dot"></span>拆解此部件</button>
+    </div>
+  </div>
+</aside>
+
+<!-- 飞行控制台 -->
+<section class="deck" id="deck" aria-hidden="true">
+  <div class="deck-head">
+    <div class="deck-state">
+      <span class="deck-dot off" id="deckDot"></span>
+      <b id="deckMode">未上电</b>
+      <em>FLIGHT CONTROL</em>
+    </div>
+    <button class="deck-exit" id="btnDeckClose" type="button">退出控制</button>
+  </div>
+
+  <div class="tlm">
+    <div class="tlm-cell"><span>ALT 高度</span><b><i id="tAlt">0.0</i><u>m</u></b></div>
+    <div class="tlm-cell"><span>H.S 水平速度</span><b><i id="tSpd">0.0</i><u>m/s</u></b></div>
+    <div class="tlm-cell"><span>BAT 电量</span><b><i id="tBat">86</i><u>%</u></b></div>
+    <div class="tlm-cell"><span>TIME 飞行时长</span><b><i id="tTime">00:00</i></b></div>
+    <div class="tlm-cell"><span>GPS 卫星</span><b><i id="tGps">0</i><u>sats</u></b></div>
+    <div class="tlm-cell"><span>RSSI 图传</span><b><i id="tRssi">—</i><u>dBm</u></b></div>
+  </div>
+
+  <div class="cmds" id="cmds">
+    <button class="cmd" data-cmd="power" type="button"><b id="cmdPowerTxt">开机</b><i>POWER</i></button>
+    <button class="cmd" data-cmd="takeoff" type="button"><b>起飞</b><i>TAKE OFF</i></button>
+    <button class="cmd" data-cmd="land" type="button"><b>降落</b><i>LAND</i></button>
+    <button class="cmd" data-cmd="rth" type="button"><b>返航</b><i>RTH</i></button>
+    <button class="cmd" data-cmd="hold" type="button"><b>悬停</b><i>HOLD</i></button>
+    <button class="cmd danger" data-cmd="estop" type="button"><b>急停</b><i>E-STOP</i></button>
+  </div>
+
+  <div class="deck-foot">
+    <div class="log" id="log"></div>
+    <div class="deck-keys"><kbd>T</kbd>起飞 <kbd>L</kbd>降落 <kbd>H</kbd>返航 <kbd>X</kbd>急停</div>
+  </div>
+</section>
+
+<!-- 底部提示 -->
+<footer class="hud-bottom">
+  <div class="hint">
+    <kbd>左键拖拽</kbd>旋转
+    <kbd>滚轮</kbd>缩放
+    <kbd>右键</kbd>平移
+    <kbd>点击</kbd>拆解部件
+    <kbd>空格</kbd>全部拆解
+  </div>
+  <div class="status">
+    <span class="pulse"></span>
+    <span id="statusText">组装态 · 8 个部件就绪</span>
+  </div>
+</footer>
+
+<div id="tooltip"></div>
+
+<!-- 加载层 -->
+<div id="loader">
+  <div class="load-ring"></div>
+  <div class="load-txt">Building Air 3S Geometry</div>
+</div>
+
+<script>
+//__JS__
+</script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+# ---- Node / 前端构建 ----
+node_modules/
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# ---- 构建产物 ----
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/captures/
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# 构建期从根目录 index.html 复制进来的页面（源文件不进版本库）
+android/app/src/main/assets/dji-air-3s.html
+
+# ---- 系统 ----
+.workbuddy/

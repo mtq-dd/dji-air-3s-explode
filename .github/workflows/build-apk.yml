@@ -1,0 +1,68 @@
+name: build-apk
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    name: 打包 Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 配置 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 配置 Gradle 缓存
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: 校验 Web 产物存在
+        run: |
+          test -f index.html || { echo "缺少 index.html，请先在本地执行 node build.mjs"; exit 1; }
+          ls -lh index.html
+
+      - name: 构建 Debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: 收集产物
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/debug/*.apk dist/dji-air-3s-debug.apk
+          ls -lh dist/
+
+      - name: 上传 APK（可下载）
+        uses: actions/upload-artifact@v4
+        with:
+          name: dji-air-3s-debug-apk
+          path: dist/dji-air-3s-debug.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: 打 tag 时发布 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/dji-air-3s-debug.apk
+          generate_release_notes: true
