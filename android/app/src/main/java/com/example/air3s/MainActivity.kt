@@ -39,6 +39,7 @@ class MainActivity : android.app.Activity() {
     /* ---------- 画面看门狗 ---------- */
     private val ui = Handler(Looper.getMainLooper())
     private var lastHealAt = 0L
+    private var healCount = 0
     private var probeBitmap: Bitmap? = null
     private var probePixels: IntArray? = null
     private var canvasHadContent = false
@@ -290,10 +291,18 @@ class MainActivity : android.app.Activity() {
 
         lastHealAt = System.currentTimeMillis()
         blackStreak = 0
-        android.util.Log.w("Air3S", "检测到画布全黑（mean=$mean），自动重建合成表面")
+        healCount++
+        android.util.Log.w("Air3S", "检测到画布全黑（mean=$mean），第 $healCount 次重建合成表面")
         nudge()
+        val degrade = if (healCount >= 2) {
+            // 修了两次还是黑：多半是这台机器的 GPU 管线跑不动 Bloom 后处理（模拟器常见），
+            // 让页面降一档画质，牺牲辉光换稳定
+            "window.DroneRender && window.DroneRender.degrade();"
+        } else {
+            ""
+        }
         webView.evaluateJavascript(
-            "window.DroneRender && (window.DroneRender.resize(), window.DroneRender.kick(true))",
+            "$degrade window.DroneRender && (window.DroneRender.resize(), window.DroneRender.kick(true))",
             null
         )
     }

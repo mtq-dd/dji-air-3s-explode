@@ -389,10 +389,30 @@ const labelLayer = document.getElementById('labelLayer');
 const inWebView = !!window.AndroidBridge || /;\s*wv\)/.test(navigator.userAgent);
 if (inWebView) document.documentElement.classList.add('webview');
 
+/* 先探一次 GPU：模拟器 / 软件渲染（SwiftShader）上，MSAA + Bloom 后处理是最容易
+   把 WebGL 图层丢掉的组合，直接在创建渲染器时就把抗锯齿关掉，真机不受影响 */
+const GPU_HINT = (() => {
+  try {
+    const c = document.createElement('canvas');
+    const gl = c.getContext('webgl2') || c.getContext('webgl');
+    if (!gl) return '';
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : '';
+    const lose = gl.getExtension('WEBGL_lose_context');
+    if (lose) lose.loseContext();   // 探完立刻释放，别占着一个上下文
+    return name;
+  } catch (e) {
+    return '';
+  }
+})();
+const SOFT_GPU = /swiftshader|llvmpipe|software|sdk_gphone|emulator|google_sdk/i.test(
+  GPU_HINT + ' ' + navigator.userAgent
+);
+
 const renderer = new THREE.WebGLRenderer({
-  antialias: true,
+  antialias: !SOFT_GPU,
   alpha: false,
-  powerPreference: 'high-performance'
+  powerPreference: SOFT_GPU ? 'default' : 'high-performance'
 });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -1090,8 +1110,19 @@ const state = {
   spin: true,
   intro: 0,
   fitTarget: 1,
-  flight: false
+  flight: false,
+  lowQuality: false
 };
+
+/* 模拟器 / 软件渲染（SwiftShader、Android Emulator）上，Bloom 的后处理链
+   容易把 WebGL 图层整块丢掉（表现为全黑，转屏后恢复）。这类环境自动降一档画质：
+   关 Bloom、pixelRatio 退回 1，真机不受影响。 */
+function setQuality(low) {
+  if (state.lowQuality === low) return;
+  state.lowQuality = low;
+  bloom.enabled = !low;
+  onResize(true);
+}
 
 /* 把包围盒 8 个角投影到 NDC，反算刚好装进画面的缩放（精确适配任意屏幕比例） */
 const _fitV = new THREE.Vector3();
@@ -1432,6 +1463,10 @@ function sizeOf() {
   return { w, h };
 }
 
+function dprOf() {
+  return state.lowQuality ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+}
+
 function applySize(w, h, dpr) {
   lastW = w;
   lastH = h;
@@ -1449,7 +1484,7 @@ function applySize(w, h, dpr) {
 
 function onResize(force) {
   const { w, h } = sizeOf();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const dpr = dprOf();
   if (!force && w === lastW && h === lastH && dpr === lastDpr) return;
   applySize(w, h, dpr);
 }
@@ -1466,7 +1501,7 @@ function kickSurface(force) {
   kickLock = now;
 
   const { w, h } = sizeOf();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const dpr = dprOf();
 
   // 1) 换一个临时 pixelRatio，强制 Three 重新分配 drawingBuffer
   renderer.setPixelRatio(dpr * 0.999);
@@ -1517,10 +1552,24 @@ renderer.domElement.addEventListener('webglcontextrestored', () => {
   onResize(true);
   kickSurface();
 });
+/* GPU 名称：软件渲染（SwiftShader）与模拟器都要降档，真机保持全画质 */
+function gpuName() {
+  try {
+    const gl = renderer.getContext();
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    return dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : '';
+  } catch (e) {
+    return '';
+  }
+}
+
 window.DroneRender = {
   kick: kickSurface,
   resize: () => onResize(true),
-  size: () => ({ ...sizeOf(), dpr: window.devicePixelRatio })
+  size: () => ({ ...sizeOf(), dpr: window.devicePixelRatio, pixelRatio: renderer.getPixelRatio(), gpu: gpuName(), low: state.lowQuality }),
+  // 看门狗反复救不回来时，原生侧会调这个降一档画质（关 Bloom + pixelRatio 1）
+  degrade: () => setQuality(true),
+  restore: () => setQuality(false)
 };
 
 /* 标签屏幕空间避让：同列向下错开，避免互相压住 */
@@ -2255,6 +2304,10 @@ updateFit(state.exploded);
 document.body.style.cursor = 'default';
 renderInfo(null);
 setStatus();
+
+/* 模拟器 / 软件渲染自动降档：这类环境的 GPU 管线跑 Bloom 后处理容易丢图层，
+   画面停在黑帧上（真机不会）。 */
+if (SOFT_GPU) setQuality(true);
 
 /* 调试/演示参数：?nointro=1&explode=1&sel=gimbal&cam=2,1.5,3.5 */
 if (QS.has('nointro')) {
