@@ -31,8 +31,21 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: 配置 Android SDK
-        uses: android-actions/setup-android@v3
+      # runner 镜像已预装 Android SDK，不用第三方 action（setup-android@v3 会去找
+      # 已被移除的 "tools" 包而失败）。这里只做 licenses 确认与缺件补装。
+      - name: 准备 Android SDK
+        run: |
+          set -e
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "SDK_ROOT=$SDK_ROOT"
+          ls "$SDK_ROOT/platforms" 2>/dev/null || true
+          SDKMGR="$(ls -d "$SDK_ROOT"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)"
+          if [ -n "$SDKMGR" ]; then
+            yes | "$SDKMGR" --licenses > /dev/null 2>&1 || true
+            "$SDKMGR" "platforms;android-35" "build-tools;35.0.0" > /dev/null 2>&1 || true
+          fi
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
 
       - name: 配置 Gradle 缓存
         uses: gradle/actions/setup-gradle@v4
