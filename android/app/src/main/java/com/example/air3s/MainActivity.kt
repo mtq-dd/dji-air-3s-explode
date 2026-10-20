@@ -76,6 +76,7 @@ class MainActivity : android.app.Activity() {
     }
 
     /** 全屏沉浸：隐藏状态栏 / 导航栏，画面延伸到刘海区 */
+    @Suppress("DEPRECATION")
     private fun applyImmersive() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             window.setDecorFitsSystemWindows(false)
@@ -166,7 +167,7 @@ class MainActivity : android.app.Activity() {
      * 返回键：先让页面退出飞行控制台 / 取消选中，
      * 页面确实没有可回退状态时才退出 App。
      */
-    @Suppress("DEPRECATION")
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
         webView.evaluateJavascript("window.__deselect ? window.__deselect() : false") { result ->
             if (result?.contains("true") != true) finish()

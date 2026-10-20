@@ -1,3 +1,5 @@
+import java.io.File
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -21,10 +23,12 @@ android {
             isShrinkResources = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // 若 CI 注入了 keystore，就用它签名；否则 release 包不签名（仅归档）
+            // 注意：这里必须用 File 而不是 java.io.File —— Kotlin DSL 里
+            // `java` 会被解析成 Gradle 的 java 扩展，写成 java.io.File 会编译不过。
             val storePath = System.getenv("SIGNING_STORE_FILE")
-            if (storePath != null && java.io.File(storePath).exists()) {
+            if (storePath != null && File(storePath).exists()) {
                 signingConfig = signingConfigs.create("ci") {
-                    storeFile = java.io.File(storePath)
+                    storeFile = File(storePath)
                     storePassword = System.getenv("SIGNING_STORE_PASSWORD")
                     keyAlias = System.getenv("SIGNING_KEY_ALIAS")
                     keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
