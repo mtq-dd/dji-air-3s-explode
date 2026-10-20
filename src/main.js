@@ -11,6 +11,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { createAudio } from './audio.js';
 
 /* ------------------------------------------------------------
  * 0. 常量
@@ -1169,6 +1170,27 @@ const partListEl = el('partList');
 const tooltip = el('tooltip');
 const statusText = el('statusText');
 
+/* ------------------------------------------------------------
+ * 音效：浏览器要求用户手势后才能出声，所以首次交互时才 unlock
+ * ---------------------------------------------------------- */
+const audio = createAudio();
+let soundOn = true;
+try {
+  soundOn = localStorage.getItem('air3s.sound') !== '0';
+} catch (e) { /* 隐私模式忽略 */ }
+
+function firstGesture() {
+  audio.unlock();
+  audio.setEnabled(soundOn);
+  el('btnSound') && el('btnSound').classList.toggle('on', soundOn);
+  window.removeEventListener('pointerdown', firstGesture);
+  window.removeEventListener('keydown', firstGesture);
+  window.removeEventListener('touchstart', firstGesture);
+}
+window.addEventListener('pointerdown', firstGesture, { passive: true });
+window.addEventListener('keydown', firstGesture);
+window.addEventListener('touchstart', firstGesture, { passive: true });
+
 // 侧栏清单
 const rowMap = new Map();
 ORDER.forEach((id, i) => {
@@ -1268,6 +1290,7 @@ function selectPart(id, explode) {
   } catch (e) { /* 浏览器环境忽略 */ }
   syncToggleButtons();
   setStatus();
+  audio.select();
 }
 
 function clearSelection() {
@@ -1299,6 +1322,7 @@ el('btnExplode').addEventListener('click', () => {
   } else {
     ORDER.forEach((id) => state.exploded.add(id));
   }
+  audio.explode();
   syncToggleButtons();
   renderInfo(state.selected);
   setStatus();
@@ -1308,6 +1332,7 @@ el('btnExplode').addEventListener('click', () => {
 });
 
 el('btnReset').addEventListener('click', () => {
+  audio.click();
   state.exploded.clear();
   clearSelection();
   syncToggleButtons();
@@ -1319,14 +1344,23 @@ el('btnReset').addEventListener('click', () => {
 });
 
 el('btnLabels').addEventListener('click', () => {
+  audio.click();
   state.showLabels = !state.showLabels;
   el('btnLabels').classList.toggle('on', state.showLabels);
 });
 
 el('btnSpin').addEventListener('click', () => {
+  audio.click();
   state.spin = !state.spin;
   controls.autoRotate = state.spin;
   el('btnSpin').classList.toggle('on', state.spin);
+});
+
+el('btnSound').addEventListener('click', () => {
+  soundOn = !soundOn;
+  audio.setEnabled(soundOn);
+  el('btnSound').classList.toggle('on', soundOn);
+  if (soundOn) audio.click();
 });
 
 el('btnPartToggle').addEventListener('click', () => {
@@ -1334,6 +1368,7 @@ el('btnPartToggle').addEventListener('click', () => {
   if (!id) return;
   if (state.exploded.has(id)) state.exploded.delete(id);
   else state.exploded.add(id);
+  audio.explode();
   syncToggleButtons();
   renderInfo(id);
   setStatus();
@@ -1531,7 +1566,11 @@ if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', () => onResize(true), { passive: true });
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) return;
+  if (document.hidden) {
+    audio.suspend();     // 退后台别继续占着音频
+    return;
+  }
+  audio.resume();
   onResize(true);
   kickSurface();
 });
@@ -1563,6 +1602,7 @@ function gpuName() {
   }
 }
 
+window.DroneAudio = audio;
 window.DroneRender = {
   kick: kickSurface,
   resize: () => onResize(true),
@@ -1846,6 +1886,7 @@ function execCommand(cmd) {
     pendingCmd = { cmd, before, at: performance.now() };
   } else {
     pushLog(res.reason, 'warn');
+    audio.deny();
   }
   emitBridge(cmd, res);
   renderTelemetry();
@@ -1913,8 +1954,27 @@ function updateLeds() {
 let fitAcc = 0;
 let tlmAcc = 0;
 
+/* 状态迁移 → 音效，集中在一处，避免每个分支各写一遍 */
+function audioTransition(from, to) {
+  if (to === 'BOOT') audio.powerOn();
+  else if (to === 'READY' && from === 'BOOT') audio.ready();
+  else if (to === 'READY' && from === 'DESCEND') audio.thud(0.8);
+  else if (to === 'READY' && from === 'CUT') audio.crash();
+  else if (to === 'SPINUP') audio.takeoff();
+  else if (to === 'DESCEND' && from !== 'CUT') audio.descend();
+  else if (to === 'RTH') audio.rth();
+  else if (to === 'HOVER' && from !== 'CLIMB') audio.hold();
+  else if (to === 'OFF') {
+    if (from === 'CUT' || from === 'DESCEND' || FLIGHT.alt > 0.05) audio.crash();
+    else audio.powerOff();
+  }
+}
+
+let lowBeepAt = 0;
+
 function updateFlight(dt) {
   FLIGHT.phaseT += dt;
+  const modeBefore = FLIGHT.mode;
 
   /* 状态机 */
   switch (FLIGHT.mode) {
@@ -1983,6 +2043,8 @@ function updateFlight(dt) {
       FLIGHT.rpmTarget = 0;
       break;
   }
+
+  if (FLIGHT.mode !== modeBefore) audioTransition(modeBefore, FLIGHT.mode);
 
   /* 高度：正常限速升降 / 停桨自由落体 */
   if (FLIGHT.mode === 'CUT') {
@@ -2060,6 +2122,13 @@ function updateFlight(dt) {
     if (!FLIGHT.warnedLow && FLIGHT.battery <= 20) {
       FLIGHT.warnedLow = true;
       pushLog('低电量 20% · 建议尽快返航', 'warn');
+      lowBeepAt = elapsed;
+      audio.lowBattery();
+    }
+    // 低电量期间每 20s 再提示一次，和真机蜂鸣器一致
+    if (FLIGHT.battery <= 20 && isAirborne() && elapsed - lowBeepAt > 20) {
+      lowBeepAt = elapsed;
+      audio.lowBattery();
     }
     if (FLIGHT.battery <= 0.5 && isAirborne() && FLIGHT.mode !== 'CUT') {
       FLIGHT.mode = 'DESCEND';
@@ -2067,6 +2136,9 @@ function updateFlight(dt) {
       pushLog('电量耗尽 · 强制降落', 'err');
     }
   }
+
+  /* 音效跟随：转速 → 电机啸叫，垂直速度 → 风噪，横向位移 → 声像 */
+  audio.update(dt, { rpm: FLIGHT.rpm, vSpeed: FLIGHT.vSpeed, pan: FLIGHT.pos.x / 2.2 });
 
   updateLeds();
   updateGroundView(dt);
@@ -2138,6 +2210,7 @@ function setFlightMode(on) {
     el('deck').setAttribute('aria-hidden', 'false');
     el('log').innerHTML = '';
 
+    audio.click();
     pushLog('控制台已接管 · 等待「开机」指令', 'info');
     renderTelemetry();
     updateFit(state.exploded);
@@ -2158,6 +2231,7 @@ function setFlightMode(on) {
   el('deck').classList.remove('on');
   el('deck').setAttribute('aria-hidden', 'true');
 
+  audio.click();
   restoreLeds();
   state.showLabels = true;
   el('btnLabels').classList.add('on');

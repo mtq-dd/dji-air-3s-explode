@@ -992,3 +992,13 @@ html.webview .deck {
 html.webview .lbl-in {
   background: rgba(7, 13, 20, 0.94);
 }
+
+/* 音效按钮：桌面显示文字，窄屏只留音符，避免顶栏换行 */
+.snd-ico { display: none; font-size: 12px; line-height: 1; }
+#btnSound { font-variant-numeric: tabular-nums; }
+
+@media (max-width: 720px), (max-height: 620px) {
+  #btnSound { padding: 0 7px; }
+  #btnSound .snd-txt { display: none; }
+  #btnSound .snd-ico { display: inline-block; }
+}

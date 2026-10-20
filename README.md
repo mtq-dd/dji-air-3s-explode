@@ -26,6 +26,30 @@ URL 可选参数（演示 / 联调用）：
 | `自转` | 自动环绕 |
 | `空格` / `Esc` | 全部拆解 / 取消选中 |
 | `飞行控制` | 进入 / 退出指令台（进入时自动收起拆解、隐藏侧栏） |
+| `音效` | 开关声音（状态记在 localStorage，默认开） |
+
+## 音效
+
+全部用 **Web Audio 合成，不加载任何音频文件**（单文件页面、`file://` 双击打开、装进 APK 的 assets 都能出声）。
+
+| 声音 | 生成方式 | 触发 |
+| --- | --- | --- |
+| 电机啸叫 | 两个失谐锯齿波（72→308 Hz 随转速）+ 带通噪声 | 转速 `rpm` |
+| 桨叶拍打 | 11→37 Hz 的 LFO 调幅 | 转速，越高拍得越密 |
+| 风噪 | 白噪声 + 低通（320→600 Hz） | 垂直速度 |
+| 声像 | `StereoPanner` 跟机身左右位移 | 水平位置 |
+| 开机自检 | 523 / 659 / 880 Hz 三声上行 | `OFF → BOOT` |
+| 自检通过 | 1046 / 1318 Hz 两声 | `BOOT → READY` |
+| 解锁起飞 | 180→620 Hz 扫频 + 起桨风噪 | `READY → SPINUP` |
+| 降落 / 返航 / 悬停 | 下行三音 / 双短音 / 单音 | 对应指令 |
+| 触地 | 96→38 Hz 低频闷响 + 沙沙 | `DESCEND → READY` |
+| 坠落 | 更重的闷响 + 金属撞击 | `CUT` 落地 |
+| 低电量 | 1318 Hz 三连，之后每 20s 一次 | 电量 ≤ 20% |
+| 交互 | 选中 / 拆解 / 点击 / 指令被拒 | UI 操作 |
+
+浏览器要求用户手势后才能出声，所以页面在首次 `pointerdown` / `keydown` / `touchstart` 时才创建 `AudioContext`；退到后台会 `suspend()`，回来再 `resume()`。
+
+调试接口：`DroneAudio.debug()` 返回 `{ state, vol, rotor, freq, wind }`，可以不靠耳朵确认音频图在跑。
 
 ## 控制指令（飞行状态机）
 
@@ -74,6 +98,7 @@ window.DroneCmd.enter(true);       // 进入控制台（等价于点按钮）
 ```
 index.html                  最终产物（单文件，可直接分发）
 src/main.js                 场景与建模源码（可读版，含飞行状态机）
+src/audio.js                程序化音效引擎（Web Audio 合成，无音频文件）
 src/style.css               HUD 样式
 src/template.html           HTML 骨架
 build.mjs                   esbuild 打包 + 内联脚本
